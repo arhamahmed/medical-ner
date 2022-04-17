@@ -16,6 +16,7 @@ import pandas as pd
 import os
 # note: need .python. namespace for (newer?) versions of tensorflor
 from tensorflow.python.keras.layers import Embedding, Dense, LSTM
+from tensorflow_addons.layers.crf import CRF
 # import torch.nn as nn
 # import torch.optim as optim
 
@@ -29,7 +30,8 @@ from keras_preprocessing.text import Tokenizer
 from tensorflow.python.keras.models import Sequential
 # from tensorflow.keras.utils.np_utils import to_categorical
 from tensorflow.python.keras.initializers import Constant
-from utils import get_sequence, get_tag_indices
+from utils import get_tag_indices, get_simple_batch
+from keras_preprocessing.sequence import pad_sequences
 
 print("loading glove")
 glove_embeddings = {}
@@ -99,54 +101,33 @@ print("running model")
 model.compile(loss = 'categorical_crossentropy', optimizer='adam',metrics = ['accuracy'])
 print(model.summary())
 
-tokenizer = Tokenizer(num_words=len(training_data_df), split=' ', oov_token='<unw>', filters=' ')
-tokenizer.fit_on_texts(training_data_df['word'].values)
-X_train = tokenizer.texts_to_sequences(training_data_df['word'].values)
+train_word_tokenizer = Tokenizer(num_words=len(training_data_df), split=' ', oov_token='<unw>', filters=' ')
+train_word_tokenizer.fit_on_texts(training_data_df['word'].values)
+train_tag_tokenizer = Tokenizer(num_words=len(training_data_df), split=' ', oov_token='<unw>', filters=' ', lower=False)
+train_tag_tokenizer.fit_on_texts(training_data_df['tag'].values)
+X_train = train_word_tokenizer.texts_to_sequences(training_data_df['word'].values)
 Y_train = pd.get_dummies(training_data_df["tag"].values)
-print("X type", type(X_train))
-print("Y type", type(Y_train))
-print("before", np.array(X_train))
-print("after", np.array(X_train).reshape(-1))
-
-# print precision, recall, f1-score, model size
-# - TODO recheck embedding layer, change input length to 1? but should read more than 1 word at a time
-# - as it is, training data is 1 word 1 tag so despite batching the input length is 1 atm
-
-# X_train = get_sequence(training_data_df["word"].values, word2index)
-# Y_train = get_sequence(training_data_df["tag"].values, tag2index)
 model.fit(np.array(X_train).reshape(-1), Y_train, batch_size=batch_size, epochs=10)
 
-# loss_function = nn.NLLLoss()
-# optimizer = optim.SGD(model.parameters(), lr=0.1)
+# x = get_simple_batch(train_word_tokenizer.texts_to_sequences(training_data_df["word"].values), batch_size)
+# X_train = [np.array(a).reshape(-1) for a in x]
+# X_train = pad_sequences(X_train, maxlen=batch_size, padding="post", value=train_word_tokenizer.word_index["<unw>"])
+# z = pd.get_dummies(training_data_df["tag"].values)
+# z_bat = get_simple_batch(z, batch_size)
+# Y_train = pad_sequences(z_bat, maxlen=batch_size, padding="post", value=train_tag_tokenizer.word_index["O"])
 
-# batch_start = 0
-# num_training_words = len(training_data_df)
-# for epoch in range(1):
-#     model.zero_grad()
+# # - TODO recheck embedding layer, change input length to 1? but should read more than 1 word at a time
+# # - as it is, training data is 1 word 1 tag so despite batching the input length is 1 atm
 
-#     print("in epoch", epoch)
-#     batch_end = batch_start + batch_size
-#     batch_end = min(num_training_words, batch_end)
+# # model.fit(X_train, Y_train, batch_size=batch_size, epochs=1)
+# for epoch in range(2):
+#     for batch in range(0, X_train.shape[0]):
+#         model.train_on_batch(X_train[batch], Y_train[batch])
 
-#     # consider this as "X"
-#     word_seq = training_data_df["word"][batch_start:batch_end]
-#     word_seq_indices = get_sequence(word_seq, word2index)
-#     # consider this as "Y"
-#     tags = training_data_df["tag"][batch_start:batch_end]
-#     tags_indices = get_sequence(tags, tag2index)
 
-#     # consider this "Y_hat"
-#     predicted_tags = model(word_seq_indices)
-
-#     batch_start += batch_size
-
-#     loss = loss_function(predicted_tags, tags_indices)
-#     loss.backward()
-#     optimizer.step()
 
 # if no luck try this: https://github.com/baaraban/pytorch_ner/blob/master/scripts/training_model.py
 # seems more intuitive
-# maybe make sep file for it lol, TODO
 
 test_tokenizer = Tokenizer(num_words=len(test_data_df), split=' ', oov_token='<unw>', filters=' ')
 test_tokenizer.fit_on_texts(test_data_df['word'].values)
@@ -155,6 +136,8 @@ X_test = test_tokenizer.texts_to_sequences(test_data_df['word'].values)
 
 Y_test = []
 for _, tag in test_data_df["tag"].items():
+    # careful which dict to use - dont use tag2index with tokenizer cause tokenizer has its own dict
+    # Y_test.append(train_tag_tokenizer.word_index[tag])
     Y_test.append(tag2index[tag])
 
 y_hat = model.predict(X_test)
