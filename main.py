@@ -13,25 +13,27 @@
 #   - fully-connected (4 layer?) lstm
 import numpy as np
 import pandas as pd
-import torch
 import os
-from tensorflow.keras.layers import Embedding, Dense, LSTM
+# note: need .python. namespace for (newer?) versions of tensorflor
+from tensorflow.python.keras.layers import Embedding, Dense, LSTM
 # import torch.nn as nn
 # import torch.optim as optim
 
 # from sklearn.feature_extraction.text import CountVectorizer
-# from sklearn.metrics import confusion_matrix, accuracy_score
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
 # from sklearn.model_selection import train_test_split
 
-from tensorflow.keras.preprocessing.text import Tokenizer
+# from tensorflow.keras.preprocessing.text import Tokenizer
+from keras_preprocessing.text import Tokenizer
 # from tensorflow.keras.preprocessing.sequence import pad_sequences
-from tensorflow.keras.models import Sequential
+from tensorflow.python.keras.models import Sequential
 # from tensorflow.keras.utils.np_utils import to_categorical
-from tensorflow.keras.initializers import Constant
+from tensorflow.python.keras.initializers import Constant
+from utils import get_sequence, get_tag_indices
 
 print("loading glove")
 glove_embeddings = {}
-f = open(os.path.join('./data/glove.6B', 'glove.6B.300d.txt'))
+f = open(os.path.join('./data/glove.6B', 'glove.6B.300d.txt'), encoding="utf-8")
 for line in f:
     parts = line.split()
     word = parts[0]
@@ -44,18 +46,19 @@ print('Loaded %s glove word vectors.' % len(glove_embeddings))
 word2index = { "-DOCSTART-": 0, "-EMPTYLINE-": 1 }
 tag2index = { "B-problem": 0, "I-problem": 1, "B-treatment": 2, "I-treatment": 3, "B-test": 4, "I-test": 5, "O": 6 }
 
-print("loading data")
+print("loading training data")
 training_data = np.loadtxt('./processed/train.txt', comments=None, dtype=str)
 training_data_df = pd.DataFrame({'word': training_data[:, 0], 'tag': training_data[:, 1]})
+
+print("loading test data")
+test_data = np.loadtxt('./processed/test.txt', comments=None, dtype=str)
+test_data_df = pd.DataFrame({'word': test_data[:, 0], 'tag': test_data[:, 1]})
 
 for word in training_data_df["word"].values:
     if word not in word2index:
         word2index[word] = len(word2index)
 
 print("word2index size", len(word2index))
-
-def get_sequence(batch_of_tokens, mapping):
-    return torch.tensor([mapping[w] for w in batch_of_tokens], dtype=torch.long)
 
 embedding_dim = 300
 vocab_size = len(word2index)
@@ -111,7 +114,7 @@ print("after", np.array(X_train).reshape(-1))
 
 # X_train = get_sequence(training_data_df["word"].values, word2index)
 # Y_train = get_sequence(training_data_df["tag"].values, tag2index)
-model.fit(np.array(X_train).reshape(-1), Y_train, batch_size=batch_size, epochs=10, verbose=2)
+model.fit(np.array(X_train).reshape(-1), Y_train, batch_size=batch_size, epochs=10)
 
 # loss_function = nn.NLLLoss()
 # optimizer = optim.SGD(model.parameters(), lr=0.1)
@@ -143,4 +146,23 @@ model.fit(np.array(X_train).reshape(-1), Y_train, batch_size=batch_size, epochs=
 
 # if no luck try this: https://github.com/baaraban/pytorch_ner/blob/master/scripts/training_model.py
 # seems more intuitive
-# maybe make sep file for it lol, TODO\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
+# maybe make sep file for it lol, TODO
+
+test_tokenizer = Tokenizer(num_words=len(test_data_df), split=' ', oov_token='<unw>', filters=' ')
+test_tokenizer.fit_on_texts(test_data_df['word'].values)
+X_test = test_tokenizer.texts_to_sequences(test_data_df['word'].values)
+# Y_test = pd.get_dummies(test_data_df["tag"].values)
+
+Y_test = []
+for _, tag in test_data_df["tag"].items():
+    Y_test.append(tag2index[tag])
+
+y_hat = model.predict(X_test)
+predicted_tags = get_tag_indices(y_hat)
+
+print("accuracy", accuracy_score(Y_test, predicted_tags))
+print("precision", precision_score(Y_test, predicted_tags, average="weighted"))
+print("recall", recall_score(Y_test, predicted_tags, average="weighted"))
+print("f1-score", f1_score(Y_test, predicted_tags, average="weighted"))
+
+# TODO need to map scores back to tags to do the comparison
