@@ -14,24 +14,23 @@
 import numpy as np
 import pandas as pd
 import os
-# note: need .python. namespace for (newer?) versions of tensorflor
-from tensorflow.python.keras.layers import Embedding, Dense, LSTM
-from tensorflow_addons.layers.crf import CRF
-# import torch.nn as nn
-# import torch.optim as optim
-
-# from sklearn.feature_extraction.text import CountVectorizer
-from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
-# from sklearn.model_selection import train_test_split
-
-# from tensorflow.keras.preprocessing.text import Tokenizer
-from keras_preprocessing.text import Tokenizer
-# from tensorflow.keras.preprocessing.sequence import pad_sequences
-from tensorflow.python.keras.models import Sequential
-# from tensorflow.keras.utils.np_utils import to_categorical
+# note: need .python. namespace for (newer?) versions of tensorflow
+from tensorflow.python.keras.layers import Embedding, Dense, CuDNNLSTM
 from tensorflow.python.keras.initializers import Constant
-from utils import get_tag_indices, get_simple_batch
+from tensorflow.python.keras.models import Sequential, Model, Input
+
+# might need to use this for the FC-LSTM structure
+from tensorflow_addons.rnn.peephole_lstm_cell import PeepholeLSTMCell
+from tensorflow_addons.layers import CRF
+
+from keras_preprocessing.text import Tokenizer
 from keras_preprocessing.sequence import pad_sequences
+
+# from tensorflow.keras.utils.np_utils import to_categorical
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
+from sklearn.model_selection import train_test_split
+
+from utils import get_tag_indices, get_simple_batch
 
 print("loading glove")
 glove_embeddings = {}
@@ -92,10 +91,19 @@ embedding_layer = Embedding(input_dim=(vocab_size + 1), output_dim=embedding_dim
 print("building model")
 model = Sequential()
 model.add(embedding_layer)
-# TODO add other LSTM architectures and ability to switch between them
-model.add(LSTM(32))
+model.add(CuDNNLSTM(32))
+# model.add(CRF(len(tag2index)))
 model.add(Dense(units=len(tag2index), activation='softmax'))
-# TODO add CRF and output layers
+
+# inp = Input(shape=(len(training_data_df),))
+# out = embedding_layer(inp)
+# ls = LSTM(32, return_sequences=True)
+# out = ls(out)
+# dense = Dense(units=len(tag2index), activation='softmax')
+# out = dense(out)
+# crf = CRF(len(tag2index))
+# out = crf(out)
+# model = Model(inputs=inp, outputs=out)
 
 print("running model")
 model.compile(loss = 'categorical_crossentropy', optimizer='adam',metrics = ['accuracy'])
