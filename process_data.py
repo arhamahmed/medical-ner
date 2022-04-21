@@ -45,7 +45,7 @@ def generate_annotated_data(data_dir):
             content = f.read().splitlines()
             text_corpus.append(content)
 
-    entries_cols = ["id", "row", "offset", "word"]
+    entries_cols = ["id", "row", "offset", "word", "line_num"]
     entries_df = pd.DataFrame(columns=entries_cols)
 
     annotations_cols = ["id", "NER_tag", "row", "offset", "length"]
@@ -97,11 +97,12 @@ def generate_annotated_data(data_dir):
     entries_df = pd.DataFrame(columns=entries_cols)  # Reset df
     tmp_list = []
 
+    row_offset = 0
     for doc_i, document in enumerate(text_corpus):
         
-        tmp_list.append([0, 0, 0, "-DOCSTART-"])
-        tmp_list.append([0, 0, 0, "-EMPTYLINE-"])
-        
+        tmp_list.append([0, 0, 0, "-DOCSTART-", 0])
+        tmp_list.append([0, 0, 0, "-EMPTYLINE-", 0])
+        rows_in_doc = 0
         for row_i, row in enumerate(document):
             row_split = row.split(" ")
             for word_i, word in enumerate(row_split):
@@ -111,9 +112,10 @@ def generate_annotated_data(data_dir):
                 word_offset = word_i # 0-based indexing
                 
                 if len(word) > 0 and "|" not in word:
-                    tmp_list.append([word_id, word_row, word_offset, word])
-            
-        tmp_list.append([0, 0, 0, "-EMPTYLINE-"])
+                    tmp_list.append([word_id, word_row, word_offset, word, word_row + row_offset])
+            rows_in_doc += 1
+        row_offset += rows_in_doc
+        tmp_list.append([0, 0, 0, "-EMPTYLINE-", 0])
 
     entries_df = pd.DataFrame(tmp_list, columns=entries_cols)
 
@@ -121,7 +123,7 @@ def generate_annotated_data(data_dir):
 
     annotations_df[['row', 'offset']] = annotations_df[['row', 'offset']].apply(pd.to_numeric)
     annotations_df['NER_tag'] = annotations_df["NER_tag"].astype(str)
-    entries_df[['row', 'offset']] = entries_df[['row', 'offset']].apply(pd.to_numeric)
+    entries_df[['row', 'offset', 'line_num']] = entries_df[['row', 'offset', 'line_num']].apply(pd.to_numeric)
     entries_df["word"] = entries_df["word"].astype(str)
 
     result_df = pd.merge(entries_df, annotations_df, how="left", on=['id', 'row', 'offset'])
@@ -138,9 +140,7 @@ def generate_annotated_data(data_dir):
     print(len(ner_counter), "named entities and", result_df.shape[0], "tokens")
     return result_df
 
-training_one = generate_annotated_data('./data/training_data/set_one/')
-training_two = generate_annotated_data('./data/training_data/set_two/')
-training_set = pd.concat([training_one, training_two])
+training_set = generate_annotated_data('./data/training_data/')
 test_set = generate_annotated_data('./data/test_data/')
 np.savetxt("./processed/train.txt", training_set.values, fmt="%s")
 np.savetxt("./processed/test.txt", test_set.values, fmt="%s")
