@@ -47,7 +47,7 @@ def get_word_sequences(data, word2index, tag2index):
 def get_formatted_data(X, Y, word2index, tag2index, maxlength):
     X = pad_sequences(X, maxlen=maxlength, padding="post", value=word2index["<padding>"])
     Y = pad_sequences(Y, maxlen=maxlength, padding="post", value=tag2index["<padding>"])
-    Y = [ np.eye(len(tag2index))[line] for line in Y]
+    # Y = [ np.eye(len(tag2index))[line] for line in Y]
     return np.array(X), np.array(Y)
 
 def convert_to_tuples(data):

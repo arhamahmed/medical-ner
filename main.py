@@ -13,13 +13,19 @@
 #   - fully-connected (4 layer?) lstm
 import numpy as np
 import os
-# note: need .python. namespace for (newer?) versions of tensorflow
-from tensorflow.python.keras.layers import Embedding, Dense, CuDNNLSTM
-from tensorflow.python.keras.initializers import Constant
-from tensorflow.python.keras.models import Sequential
+
+# import keras.api._v2.keras as keras # https://stackoverflow.com/a/71838765
+from tensorflow_addons.text.crf_wrapper import CRFModelWrapper
 
 from sklearn.metrics import multilabel_confusion_matrix
 from sklearn.model_selection import train_test_split
+
+# import tensorflow as tf # then do tf.keras.x.y.z everywhere, no ide support though
+# workaround from: https://github.com/tensorflow/tensorflow/issues/53144#issuecomment-1030773659
+import typing
+from tensorflow import keras
+if typing.TYPE_CHECKING:
+    from keras.api._v2 import keras
 
 from utils import get_embedding_matrix, get_formatted_data, get_stats, get_word_sequences, get_word_to_index, load_dataset, load_glove
 
@@ -45,25 +51,32 @@ X_train, X_val, Y_train, Y_val = train_test_split(X, Y, test_size=0.15, random_s
 embedding_dim = 300
 vocab_size = len(word2index)
 word_embedding_matrix = get_embedding_matrix(embedding_dim, vocab_size, word2index, glove_embeddings)
+batch_size = 50
 
-embedding_layer = Embedding(
+# TODO character embeddings, final dim should be 350
+embedding_layer = keras.layers.Embedding(
     input_dim=(vocab_size + 1), 
     output_dim=embedding_dim, 
     input_length=longest_line, 
-    embeddings_initializer=Constant(word_embedding_matrix), 
+    embeddings_initializer=keras.initializers.Constant(word_embedding_matrix), 
     trainable=True # TODO this should be false once embedding/hit-rate issue isfixed
 )
 
 print("Building model")
-model = Sequential()
-model.add(embedding_layer)
-model.add(CuDNNLSTM(300, return_sequences=True))
-model.add(Dense(units=len(tag2index), activation='softmax'))
-model.compile(loss = 'categorical_crossentropy', optimizer='adam',metrics = ['accuracy'])
+inp = keras.Input(shape=(longest_line,), name="input")
+model = embedding_layer(inp)
+model = keras.layers.LSTM(300, return_sequences=True)(model)
+# model = keras.layers.TimeDistributed(keras.layers.Dense(units=len(tag2index), activation='relu'))(model)
+# crf = CRF(len(tag2index))
+# out = crf(model)
+# model = keras.models.Model(inp, out)
+model = CRFModelWrapper(keras.Model(inputs=inp, outputs=model), len(tag2index))
+model.compile(optimizer='adam', metrics = ['accuracy'])
+model.build((batch_size, longest_line,))
 print(model.summary())
 
 print("Training model")
-model.fit(X_train, Y_train, batch_size=50, epochs=10)
+model.fit(X_train, Y_train, batch_size=batch_size, epochs=1)
 
 X_test, Y_test = get_word_sequences(test_data_df, word2index, tag2index)
 X_test, Y_test = get_formatted_data(X_test, Y_test, word2index, tag2index, longest_line)
@@ -73,8 +86,8 @@ X_test, Y_test = get_formatted_data(X_test, Y_test, word2index, tag2index, longe
 
 print("Running predictions")
 y_hat = model.predict(X_test)
-predicted_tags = np.argmax(y_hat, axis=2)
-y_true = np.argmax(Y_test, axis=2)
+predicted_tags = np.argmax(y_hat, axis=1)
+y_true = np.argmax(Y_test, axis=1)
 print("Overall model accuracy: ", (predicted_tags == y_true).mean())
 print('---------------------')
 
