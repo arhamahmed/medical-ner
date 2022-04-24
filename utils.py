@@ -3,11 +3,11 @@ import pandas as pd
 from keras_preprocessing.text import Tokenizer
 from keras_preprocessing.sequence import pad_sequences
 
-def load_glove(path):
+def load_glove(path, large_set = False):
     glove_embeddings = {}
     f = open(path, encoding="utf-8")
     for line in f:
-        parts = line.split()
+        parts = line.split(' ') if large_set else line.split()
         word = parts[0]
         # this is the actual vector form of the word
         values = np.asarray(parts[1:], dtype='float32')
@@ -30,7 +30,17 @@ def get_word_to_index(train_data, test_data):
     test_word_tokenizer = Tokenizer(num_words=len(test_data), split=' ', oov_token='<unw>', filters=' ')
     test_word_tokenizer.fit_on_texts(test_data['word'].values)
 
-    return test_word_tokenizer.word_index | train_word_tokenizer.word_index
+    word2index = test_word_tokenizer.word_index | train_word_tokenizer.word_index
+    word2index["<padding>"] = len(word2index)
+    return word2index
+
+def get_char_to_index(data_dict):
+    char2index = {'<pad>': 0, '<unw>': 1}
+    for word, _ in data_dict.items():
+        for ch in word:
+            if ch not in char2index:
+                char2index[ch] = len(char2index)
+    return char2index
 
 # using the mappings, convert sequences of words to sequences of indices
 def get_word_sequences(data, word2index, tag2index):
@@ -42,6 +52,46 @@ def get_word_sequences(data, word2index, tag2index):
     X.pop(0)
     Y.pop(0)
     return X, Y
+
+def get_char_sequences(data, char2index, line_length, char_dim_size):
+    all_lines = data.groupby('line_num').apply(convert_to_tuples).tolist()
+    # drop the added docstarts/emptylines
+    all_lines.pop(0)
+    X_character = []
+    for line in all_lines:
+        line_seq = []
+        for word_index in range(line_length):
+            word_char_seq = []
+            # recall that a line is a series of tuples (word, tag pairs)
+            for i in range(char_dim_size):
+                try:
+                    word_char_seq.append(char2index[line[word_index][0].lower()[i]])
+                except:
+                    word_char_seq.append(char2index['<pad>'])
+            line_seq.append(word_char_seq)
+        X_character.append(line_seq)
+    return X_character
+
+def get_char_sequences_from_word_sequences(word_sequences, char2index, index2word, sequence_length, char_length):
+    X_character = []
+    for seq in word_sequences:
+        line_seq = []
+        for word_index in range(sequence_length):
+            word_char_seq = []
+
+            # skip padded or unw words
+            for i in range(char_length):
+                word = index2word[seq[word_index]]
+                if word == '<unw' or word == '<pad>':
+                    word_char_seq.append(char2index['<pad>'])
+                else:
+                    try:
+                        word_char_seq.append(char2index[word.lower()[i]])
+                    except:
+                        word_char_seq.append(char2index['<pad>'])
+            line_seq.append(word_char_seq)
+        X_character.append(line_seq)
+    return X_character
 
 # ensure all sequences are of equal length, and that y is in the form of an indicator variable
 def get_formatted_data(X, Y, word2index, tag2index, maxlength):
