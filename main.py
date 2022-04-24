@@ -26,6 +26,9 @@ if typing.TYPE_CHECKING:
 from utils import get_char_sequences_from_word_sequences, get_char_to_index, get_embedding_matrix, get_formatted_data, get_stats, \
     get_word_sequences, get_word_to_index, load_dataset, load_glove
 
+print("Select a model architecture (type a number): 1 = UniLSTM, 2 = BiLSTM, 3 = LSTM w/attention, 4 = 4-layer Stacked LSTM, 5 = FC-LSTM")
+model_architecture = 3 # int(input()) # TODO use user input
+
 print("Loading pretrained GloVe embeddings")
 glove_embeddings = load_glove('./data/glove.6B/glove.6B.300d.txt')
 # glove_embeddings = load_glove('./data/glove.840B.300d/glove.840B.300d.txt', True)
@@ -55,31 +58,56 @@ word_embedding_matrix = get_embedding_matrix(embedding_dim, vocab_size, word2ind
 print("Generating character sequence input")
 X_char_train = np.array(get_char_sequences_from_word_sequences(X_train, char2index, index2word, longest_line, char_dim_size))
 
-char_inp = keras.Input(shape=(longest_line, char_dim_size,), name="Character Input")
+char_inp = keras.Input(shape=(longest_line, char_dim_size,), name="Character_Input")
 char_out = keras.layers.TimeDistributed(keras.layers.Embedding(
         input_dim=len(char2index),
         output_dim=char_dim_size, 
         # input_length=char_dim_size, 
         trainable=True
-    ))(char_inp)
+    ), name = "Character_Embedding")(char_inp)
 char_out = keras.layers.TimeDistributed(keras.layers.Bidirectional(
         keras.layers.LSTM(150, return_sequences=False) # the num units must be 1/2 of units in non-bi lstm, also set False
-    ))(char_out)
+    ), name = "Character_BiLSTM")(char_out)
 
 print("Building model")
-inp = keras.Input(shape=(longest_line,), name="Word input")
+inp = keras.Input(shape=(longest_line,), name="Word_Input")
 word_out = keras.layers.Embedding(
     input_dim=(vocab_size + 1), 
     output_dim=embedding_dim, 
     input_length=longest_line, 
     embeddings_initializer=keras.initializers.Constant(word_embedding_matrix), 
-    trainable=False
+    trainable=False,
+    name = "Glove_Word_Embeddings"
     )(inp)
 
-out = keras.layers.concatenate([word_out, char_out])
+out = keras.layers.concatenate([word_out, char_out], name = "Word_Character_concatenation")
 
-out = keras.layers.LSTM(300, return_sequences=True, dropout=0.4)(out)
-out = keras.layers.Dense(units=len(tag2index), activation='softmax')(out)
+match model_architecture:
+    case 1:
+        print("using unidirectional LSTM")
+        out = keras.layers.LSTM(300, return_sequences=True, dropout=0.4, name = "Main_UniLSTM")(out)
+    case 2:
+        print("using bidirectional LSTM")
+        out = keras.layers.Bidirectional(keras.layers.LSTM(150, return_sequences=True, dropout=0.4), name="Main_BiLSTM")(out)
+    case 3:
+        print("using LSTM with attention")
+        out = keras.layers.LSTM(300, return_sequences=True, dropout=0.4, name = "UniLSTM")(out)
+        out = keras.layers.Attention(name = "Attention")([out, out])
+        # TODO: above works, but doesnt make sense. need a bigger change in architecture -> setup encoder+decoder w/attention
+        # see: https://stackoverflow.com/a/68297796
+        raise NotImplementedError("havent implemented attention properly yet")
+    case 4:
+        print("using stacked LSTM")
+        # TODO: perf is a decent amount worse than bilstm, they should be similar. try moving dropout elsewhere
+        out = keras.layers.LSTM(300, return_sequences=True, dropout=0.4, name = "Stacked_UniLSTM_1")(out)
+        out = keras.layers.LSTM(300, return_sequences=True, dropout=0.4, name = "Stacked_UniLSTM_2")(out)
+        out = keras.layers.LSTM(300, return_sequences=True, dropout=0.4, name = "Stacked_UniLSTM_3")(out)
+        out = keras.layers.LSTM(300, return_sequences=True, dropout=0.4, name = "Stacked_UniLSTM_4")(out)
+    case 5:
+        print("using fully-connected LSTM")
+        raise NotImplementedError("havent implemented FC yet")
+
+out = keras.layers.Dense(units=len(tag2index), activation='softmax', name = "Dense_Prediction")(out)
 model = keras.models.Model([inp, char_inp], out) # keras.models.Model(inp, out)
 model.compile(loss = 'categorical_crossentropy', optimizer='adam', metrics = ['accuracy'])
 model.build((batch_size, longest_line,))
@@ -96,7 +124,7 @@ X_test, Y_test = get_formatted_data(X_test, Y_test, word2index, tag2index, longe
 
 print("Running predictions")
 
-print("Generating test set characer sequences")
+print("Generating test set character sequences")
 X_character_test = np.array(get_char_sequences_from_word_sequences(X_test, char2index, index2word, longest_line, char_dim_size))
 print("Got sequences with shape ", X_character_test.shape)
 
