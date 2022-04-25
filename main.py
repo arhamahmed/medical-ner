@@ -12,6 +12,7 @@
 #   - 4-layer lstm
 #   - fully-connected (4 layer?) lstm
 import numpy as np
+import tensorflow as tf
 
 from sklearn.metrics import multilabel_confusion_matrix
 from sklearn.model_selection import train_test_split
@@ -25,9 +26,10 @@ if typing.TYPE_CHECKING:
 
 from utils import get_char_sequences_from_word_sequences, get_char_to_index, get_embedding_matrix, get_formatted_data, get_stats, \
     get_word_sequences, get_word_to_index, load_dataset, load_glove
+from fc_lstm_model import FcLstmCell
 
 print("Select a model architecture (type a number): 1 = UniLSTM, 2 = BiLSTM, 3 = LSTM w/attention, 4 = 4-layer Stacked LSTM, 5 = FC-LSTM")
-model_architecture = 3 # int(input()) # TODO use user input
+model_architecture = 5 # int(input()) # TODO use user input
 
 print("Loading pretrained GloVe embeddings")
 glove_embeddings = load_glove('./data/glove.6B/glove.6B.300d.txt')
@@ -47,7 +49,7 @@ X, Y = get_word_sequences(training_data_df, word2index, tag2index)
 longest_line = len(max(X, key=len))
 X, Y = get_formatted_data(X, Y, word2index, tag2index, longest_line)
 
-X_train, X_val, Y_train, Y_val = train_test_split(X, Y, test_size=0.15, random_state=123)
+X_train, _, Y_train, _ = train_test_split(X, Y, test_size=0.15, random_state=123)
 
 char_dim_size = 50
 batch_size = 50
@@ -81,7 +83,7 @@ word_out = keras.layers.Embedding(
     )(inp)
 
 out = keras.layers.concatenate([word_out, char_out], name = "Word_Character_concatenation")
-
+# TODO: fix LSTM units, main one should be 350, char should be 50 (or 25 cause bidirectional)
 match model_architecture:
     case 1:
         print("using unidirectional LSTM")
@@ -104,8 +106,20 @@ match model_architecture:
         out = keras.layers.LSTM(300, return_sequences=True, dropout=0.4, name = "Stacked_UniLSTM_3")(out)
         out = keras.layers.LSTM(300, return_sequences=True, dropout=0.4, name = "Stacked_UniLSTM_4")(out)
     case 5:
-        print("using fully-connected LSTM")
-        raise NotImplementedError("havent implemented FC yet")
+        print("Using fully-connected LSTM")
+        # from the research paper (and diagrams), the higher layer takes input from the previous timestep
+        # (which is standard of a stacked LSTM) as well as the plus the previous timestep (novel) of the lower
+        # layers; the previous hidden state of the higher layer is passed as well (standard).
+        # thus, we need to ensure that the higher layer receives a hidden state that aggregates the 
+        # current and past timestep:
+        # we do this by simply adding the two timesteps via `tf.roll` on axis=1 (timestep axis) with 1 left shift
+        out = keras.layers.LSTM(300, return_sequences=True, name = "FC_1")(out)
+        out = keras.layers.Lambda(lambda x: x + tf.roll(x, -1, 1), name = "Fully_connect_hidden_states")(out)
+        out = keras.layers.LSTM(300, return_sequences=True, name = "FC_2")(out)
+        out = keras.layers.Lambda(lambda x: x + tf.roll(x, -1, 1), name = "Fully_connect_hidden_states")(out)
+        out = keras.layers.LSTM(300, return_sequences=True, name = "FC_3")(out)
+        out = keras.layers.Lambda(lambda x: x + tf.roll(x, -1, 1), name = "Fully_connect_hidden_states")(out)
+        out = keras.layers.LSTM(300, return_sequences=True, name = "FC_4")(out)
 
 out = keras.layers.Dense(units=len(tag2index), activation='softmax', name = "Dense_Prediction")(out)
 model = keras.models.Model([inp, char_inp], out) # keras.models.Model(inp, out)
@@ -118,9 +132,6 @@ model.fit([X_train, X_char_train], Y_train, batch_size=batch_size, epochs=10)
 
 X_test, Y_test = get_word_sequences(test_data_df, word2index, tag2index)
 X_test, Y_test = get_formatted_data(X_test, Y_test, word2index, tag2index, longest_line)
-# can use the below to verify on validation split
-# X_test = X_val
-# Y_test = Y_val
 
 print("Running predictions")
 
