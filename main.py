@@ -17,6 +17,8 @@ import tensorflow as tf
 from sklearn.metrics import multilabel_confusion_matrix
 from sklearn.model_selection import train_test_split
 
+from tensorflow_addons.text.crf_wrapper import CRFModelWrapper
+
 # known issue with IDEs, see: https://github.com/tensorflow/tensorflow/issues/53144#issuecomment-1030773659
 # and see: https://stackoverflow.com/a/71838765
 import typing
@@ -26,10 +28,9 @@ if typing.TYPE_CHECKING:
 
 from utils import get_char_sequences_from_word_sequences, get_char_to_index, get_embedding_matrix, get_formatted_data, get_stats, \
     get_word_sequences, get_word_to_index, load_dataset, load_glove
-from fc_lstm_model import FcLstmCell
 
 print("Select a model architecture (type a number): 1 = UniLSTM, 2 = BiLSTM, 3 = LSTM w/attention, 4 = 4-layer Stacked LSTM, 5 = FC-LSTM")
-model_architecture = 5 # int(input()) # TODO use user input
+model_architecture = int(input())
 
 print("Loading pretrained GloVe embeddings")
 glove_embeddings = load_glove('./data/glove.6B/glove.6B.300d.txt')
@@ -68,7 +69,7 @@ char_out = keras.layers.TimeDistributed(keras.layers.Embedding(
         trainable=True
     ), name = "Character_Embedding")(char_inp)
 char_out = keras.layers.TimeDistributed(keras.layers.Bidirectional(
-        keras.layers.LSTM(150, return_sequences=False) # the num units must be 1/2 of units in non-bi lstm, also set False
+        keras.layers.LSTM(25, return_sequences=False) # the num units must be 1/2 of units in non-bi lstm, also set False
     ), name = "Character_BiLSTM")(char_out)
 
 print("Building model")
@@ -83,28 +84,29 @@ word_out = keras.layers.Embedding(
     )(inp)
 
 out = keras.layers.concatenate([word_out, char_out], name = "Word_Character_concatenation")
-# TODO: fix LSTM units, main one should be 350, char should be 50 (or 25 cause bidirectional)
 match model_architecture:
     case 1:
-        print("using unidirectional LSTM")
-        out = keras.layers.LSTM(300, return_sequences=True, dropout=0.4, name = "Main_UniLSTM")(out)
+        print("Using unidirectional LSTM")
+        out = keras.layers.LSTM(350, return_sequences=True, name = "Main_UniLSTM")(out)
     case 2:
-        print("using bidirectional LSTM")
-        out = keras.layers.Bidirectional(keras.layers.LSTM(150, return_sequences=True, dropout=0.4), name="Main_BiLSTM")(out)
+        print("Using bidirectional LSTM")
+        out = keras.layers.Bidirectional(keras.layers.LSTM(175, return_sequences=True), name="Main_BiLSTM")(out)
     case 3:
-        print("using LSTM with attention")
-        out = keras.layers.LSTM(300, return_sequences=True, dropout=0.4, name = "UniLSTM")(out)
+        print("Using LSTM with attention")
+
+        # encoder
+        out = keras.layers.LSTM(350, return_sequences=True, name = "Encoder_LSTM")(out)
         out = keras.layers.Attention(name = "Attention")([out, out])
-        # TODO: above works, but doesnt make sense. need a bigger change in architecture -> setup encoder+decoder w/attention
-        # see: https://stackoverflow.com/a/68297796
-        raise NotImplementedError("havent implemented attention properly yet")
+
+        # decoder
+        out = keras.layers.LSTM(350, return_sequences=True, name = "Decoder_LSTM")(out)
     case 4:
-        print("using stacked LSTM")
+        print("Using stacked LSTM")
         # TODO: perf is a decent amount worse than bilstm, they should be similar. try moving dropout elsewhere
-        out = keras.layers.LSTM(300, return_sequences=True, dropout=0.4, name = "Stacked_UniLSTM_1")(out)
-        out = keras.layers.LSTM(300, return_sequences=True, dropout=0.4, name = "Stacked_UniLSTM_2")(out)
-        out = keras.layers.LSTM(300, return_sequences=True, dropout=0.4, name = "Stacked_UniLSTM_3")(out)
-        out = keras.layers.LSTM(300, return_sequences=True, dropout=0.4, name = "Stacked_UniLSTM_4")(out)
+        out = keras.layers.LSTM(350, return_sequences=True, name = "Stacked_UniLSTM_1")(out)
+        out = keras.layers.LSTM(350, return_sequences=True, name = "Stacked_UniLSTM_2")(out)
+        out = keras.layers.LSTM(350, return_sequences=True, name = "Stacked_UniLSTM_3")(out)
+        out = keras.layers.LSTM(350, return_sequences=True, name = "Stacked_UniLSTM_4")(out)
     case 5:
         print("Using fully-connected LSTM")
         # from the research paper (and diagrams), the higher layer takes input from the previous timestep
@@ -113,18 +115,21 @@ match model_architecture:
         # thus, we need to ensure that the higher layer receives a hidden state that aggregates the 
         # current and past timestep:
         # we do this by simply adding the two timesteps via `tf.roll` on axis=1 (timestep axis) with 1 left shift
-        out = keras.layers.LSTM(300, return_sequences=True, name = "FC_1")(out)
-        out = keras.layers.Lambda(lambda x: x + tf.roll(x, -1, 1), name = "Fully_connect_hidden_states")(out)
-        out = keras.layers.LSTM(300, return_sequences=True, name = "FC_2")(out)
-        out = keras.layers.Lambda(lambda x: x + tf.roll(x, -1, 1), name = "Fully_connect_hidden_states")(out)
-        out = keras.layers.LSTM(300, return_sequences=True, name = "FC_3")(out)
-        out = keras.layers.Lambda(lambda x: x + tf.roll(x, -1, 1), name = "Fully_connect_hidden_states")(out)
-        out = keras.layers.LSTM(300, return_sequences=True, name = "FC_4")(out)
+        out = keras.layers.LSTM(350, return_sequences=True, name = "FC_1")(out)
+        out = keras.layers.Lambda(lambda x: x + tf.roll(x, -1, 1), name = "Fully_connect_hidden_states_1")(out)
+        out = keras.layers.LSTM(350, return_sequences=True, name = "FC_2")(out)
+        out = keras.layers.Lambda(lambda x: x + tf.roll(x, -1, 1), name = "Fully_connect_hidden_states_2")(out)
+        out = keras.layers.LSTM(350, return_sequences=True, name = "FC_3")(out)
+        out = keras.layers.Lambda(lambda x: x + tf.roll(x, -1, 1), name = "Fully_connect_hidden_states_3")(out)
+        out = keras.layers.LSTM(350, return_sequences=True, name = "FC_4")(out)
 
+out = keras.layers.Dropout(0.4, name="Dropout")(out)
 out = keras.layers.Dense(units=len(tag2index), activation='softmax', name = "Dense_Prediction")(out)
 model = keras.models.Model([inp, char_inp], out) # keras.models.Model(inp, out)
+# model = CRFModelWrapper(model, len(tag2index))
 model.compile(loss = 'categorical_crossentropy', optimizer='adam', metrics = ['accuracy'])
 model.build((batch_size, longest_line,))
+# model.build([(None, longest_line), (None, longest_line, char_dim_size)]) # TODO: for CRFModelWrapper
 print(model.summary())
 
 print("Training model")
@@ -140,8 +145,8 @@ X_character_test = np.array(get_char_sequences_from_word_sequences(X_test, char2
 print("Got sequences with shape ", X_character_test.shape)
 
 y_hat = model.predict([X_test, X_character_test], verbose=1)
-predicted_tags = np.argmax(y_hat, axis=-1)
-y_true = np.argmax(Y_test, axis=2)
+predicted_tags = np.argmax(y_hat, axis=-1) # axis = 1 w/crf wrapper
+y_true = np.argmax(Y_test, axis=2)  # axis = 1 w/crf wrapper
 print("Overall model accuracy: ", (predicted_tags == y_true).mean())
 print('---------------------')
 
