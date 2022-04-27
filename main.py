@@ -13,11 +13,13 @@
 #   - fully-connected (4 layer?) lstm
 import numpy as np
 import tensorflow as tf
+import datetime
 
 from sklearn.metrics import multilabel_confusion_matrix
 from sklearn.model_selection import train_test_split
 
 from tensorflow_addons.text.crf_wrapper import CRFModelWrapper
+from tf2crf import CRF, ModelWithCRFLoss
 
 # known issue with IDEs, see: https://github.com/tensorflow/tensorflow/issues/53144#issuecomment-1030773659
 # and see: https://stackoverflow.com/a/71838765
@@ -123,17 +125,26 @@ match model_architecture:
         out = keras.layers.Lambda(lambda x: x + tf.roll(x, -1, 1), name = "Fully_connect_hidden_states_3")(out)
         out = keras.layers.LSTM(350, return_sequences=True, name = "FC_4")(out)
 
+tensorboard_callback = keras.callbacks.TensorBoard(
+    log_dir='./logs/fit' + datetime.datetime.now().strftime("%Y%m%d-%H%M%S"),
+    histogram_freq=1,
+    profile_batch = (1,250)
+)
+
 out = keras.layers.Dropout(0.4, name="Dropout")(out)
 out = keras.layers.Dense(units=len(tag2index), activation='softmax', name = "Dense_Prediction")(out)
-model = keras.models.Model([inp, char_inp], out) # keras.models.Model(inp, out)
-# model = CRFModelWrapper(model, len(tag2index))
-model.compile(loss = 'categorical_crossentropy', optimizer='adam', metrics = ['accuracy'])
+# out = keras.layers.Dense(units=350, activation='relu', name = "Dense")(out)
+# out = CRF(units = len(tag2index), dtype='float32')(out)
+model = keras.models.Model([inp, char_inp], out)
+# model = ModelWithCRFLoss(model, sparse_target=False)
+# model = CRFModelWrapper(model, len(tag2index)) -- # TODO: for ModelWithCRFLoss
+model.compile(loss = 'categorical_crossentropy', optimizer='adam', metrics = ['accuracy']) # TODO no loss for crf
 model.build((batch_size, longest_line,))
 # model.build([(None, longest_line), (None, longest_line, char_dim_size)]) # TODO: for CRFModelWrapper
 print(model.summary())
 
 print("Training model")
-model.fit([X_train, X_char_train], Y_train, batch_size=batch_size, epochs=10)
+model.fit([X_train, X_char_train], Y_train, batch_size=batch_size, epochs=1, callbacks=[tensorboard_callback])
 
 X_test, Y_test = get_word_sequences(test_data_df, word2index, tag2index)
 X_test, Y_test = get_formatted_data(X_test, Y_test, word2index, tag2index, longest_line)
@@ -144,13 +155,15 @@ print("Generating test set character sequences")
 X_character_test = np.array(get_char_sequences_from_word_sequences(X_test, char2index, index2word, longest_line, char_dim_size))
 print("Got sequences with shape ", X_character_test.shape)
 
-y_hat = model.predict([X_test, X_character_test], verbose=1)
-predicted_tags = np.argmax(y_hat, axis=-1) # axis = 1 w/crf wrapper
-y_true = np.argmax(Y_test, axis=2)  # axis = 1 w/crf wrapper
+y_hat = model.predict([X_test, X_character_test], verbose=10)
+predicted_tags = np.argmax(y_hat, axis=-1)
+y_true = np.argmax(Y_test, axis=2)  # axis = 1 w/crf wrapper (tensorflow_addons)
 print("Overall model accuracy: ", (predicted_tags == y_true).mean())
 print('---------------------')
 
 confusion_matrix = multilabel_confusion_matrix(y_true.flatten(), predicted_tags.flatten())
+# y_true argmax on axis 2, pass y_true and y_hat here if using crf2tensor lib
+# confusion_matrix = multilabel_confusion_matrix(y_true.flatten(), y_hat.flatten()) # TODO: use w/crf
 
 accuracy_scores = []
 precision_scores = []

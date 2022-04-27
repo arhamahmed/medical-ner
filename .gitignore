@@ -130,5 +130,5 @@ dmypy.json
 
 # health data requires signing privacy/usage agreements
 data/**/**
-preprocessed/**/**
 processed/**/**
+logs/**/**
