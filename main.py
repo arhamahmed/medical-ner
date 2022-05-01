@@ -1,16 +1,3 @@
-# 4 layers:
-# 1) txt to glove embeddings (using pretrained glove model)
-# 2) LSTM
-# 3) CRF
-# 4) output layer: "feeds the correction information back to the upper layer by calculating
-#                   the difference between the output and the training label."
-# see: https://stackoverflow.com/questions/40331510/how-to-stack-multiple-lstm-in-keras
-# LSTM structures to do:
-#   - simple 1 layer unidirectional lstm
-#   - bidirectional lstm
-#   - attention lstm
-#   - 4-layer lstm
-#   - fully-connected (4 layer?) lstm
 import numpy as np
 import tensorflow as tf
 import datetime
@@ -18,7 +5,6 @@ import datetime
 from sklearn.metrics import multilabel_confusion_matrix
 from sklearn.model_selection import train_test_split
 
-from tensorflow_addons.text.crf_wrapper import CRFModelWrapper
 from tf2crf import CRF, ModelWithCRFLoss
 
 # known issue with IDEs, see: https://github.com/tensorflow/tensorflow/issues/53144#issuecomment-1030773659
@@ -35,8 +21,7 @@ print("Select a model architecture (type a number): 1 = UniLSTM, 2 = BiLSTM, 3 =
 model_architecture = int(input())
 
 print("Loading pretrained GloVe embeddings")
-glove_embeddings = load_glove('./data/glove.6B/glove.6B.300d.txt')
-# glove_embeddings = load_glove('./data/glove.840B.300d/glove.840B.300d.txt', True)
+glove_embeddings = load_glove('./data/glove.840B.300d/glove.840B.300d.txt', True)
 tag2index = { "B-problem": 0, "I-problem": 1, "B-treatment": 2, "I-treatment": 3, "B-test": 4, "I-test": 5, "O": 6, "<unw>": 7, "<padding>": 8 }
 
 print("Loading datasets")
@@ -52,7 +37,7 @@ X, Y = get_word_sequences(training_data_df, word2index, tag2index)
 longest_line = len(max(X, key=len))
 X, Y = get_formatted_data(X, Y, word2index, tag2index, longest_line)
 
-X_train, _, Y_train, _ = train_test_split(X, Y, test_size=0.15, random_state=123)
+X_train, _, Y_train, _ = train_test_split(X, Y, test_size=0.10, random_state=123)
 
 char_dim_size = 50
 batch_size = 50
@@ -92,7 +77,7 @@ match model_architecture:
         out = keras.layers.LSTM(350, return_sequences=True, name = "Main_UniLSTM")(out)
     case 2:
         print("Using bidirectional LSTM")
-        out = keras.layers.Bidirectional(keras.layers.LSTM(175, return_sequences=True), name="Main_BiLSTM")(out)
+        out = keras.layers.Bidirectional(keras.layers.LSTM(350, return_sequences=True), name="Main_BiLSTM")(out)
     case 3:
         print("Using LSTM with attention")
 
@@ -104,11 +89,10 @@ match model_architecture:
         out = keras.layers.LSTM(350, return_sequences=True, name = "Decoder_LSTM")(out)
     case 4:
         print("Using stacked LSTM")
-        # TODO: perf is a decent amount worse than bilstm, they should be similar. try moving dropout elsewhere
-        out = keras.layers.LSTM(350, return_sequences=True, name = "Stacked_UniLSTM_1")(out)
-        out = keras.layers.LSTM(350, return_sequences=True, name = "Stacked_UniLSTM_2")(out)
-        out = keras.layers.LSTM(350, return_sequences=True, name = "Stacked_UniLSTM_3")(out)
-        out = keras.layers.LSTM(350, return_sequences=True, name = "Stacked_UniLSTM_4")(out)
+        out = keras.layers.Bidirectional(keras.layers.LSTM(350, return_sequences=True), name = "Stacked_BiLSTM_1")(out)
+        out = keras.layers.Bidirectional(keras.layers.LSTM(350, return_sequences=True), name = "Stacked_BiLSTM_2")(out)
+        out = keras.layers.Bidirectional(keras.layers.LSTM(350, return_sequences=True), name = "Stacked_BiLSTM_3")(out)
+        out = keras.layers.Bidirectional(keras.layers.LSTM(350, return_sequences=True), name = "Stacked_BiLSTM_4")(out)
     case 5:
         print("Using fully-connected LSTM")
         # from the research paper (and diagrams), the higher layer takes input from the previous timestep
@@ -117,53 +101,50 @@ match model_architecture:
         # thus, we need to ensure that the higher layer receives a hidden state that aggregates the 
         # current and past timestep:
         # we do this by simply adding the two timesteps via `tf.roll` on axis=1 (timestep axis) with 1 left shift
-        out = keras.layers.LSTM(350, return_sequences=True, name = "FC_1")(out)
+        out = keras.layers.Bidirectional(keras.layers.LSTM(350, return_sequences=True), name = "BiFC_1")(out)
         out = keras.layers.Lambda(lambda x: x + tf.roll(x, -1, 1), name = "Fully_connect_hidden_states_1")(out)
-        out = keras.layers.LSTM(350, return_sequences=True, name = "FC_2")(out)
+        out = keras.layers.Bidirectional(keras.layers.LSTM(350, return_sequences=True), name = "BiFC_2")(out)
         out = keras.layers.Lambda(lambda x: x + tf.roll(x, -1, 1), name = "Fully_connect_hidden_states_2")(out)
-        out = keras.layers.LSTM(350, return_sequences=True, name = "FC_3")(out)
+        out = keras.layers.Bidirectional(keras.layers.LSTM(350, return_sequences=True), name = "BiFC_3")(out)
         out = keras.layers.Lambda(lambda x: x + tf.roll(x, -1, 1), name = "Fully_connect_hidden_states_3")(out)
-        out = keras.layers.LSTM(350, return_sequences=True, name = "FC_4")(out)
+        out = keras.layers.Bidirectional(keras.layers.LSTM(350, return_sequences=True), name = "BiFC_4")(out)
 
 tensorboard_callback = keras.callbacks.TensorBoard(
     log_dir='./logs/fit' + datetime.datetime.now().strftime("%Y%m%d-%H%M%S"),
     histogram_freq=1,
-    profile_batch = (1,250)
+    profile_batch = (150,170)
 )
 
 out = keras.layers.Dropout(0.4, name="Dropout")(out)
-out = keras.layers.Dense(units=len(tag2index), activation='softmax', name = "Dense_Prediction")(out)
-# out = keras.layers.Dense(units=350, activation='relu', name = "Dense")(out)
-# out = CRF(units = len(tag2index), dtype='float32')(out)
+out = CRF(units = len(tag2index), dtype='float32')(out)
 model = keras.models.Model([inp, char_inp], out)
-# model = ModelWithCRFLoss(model, sparse_target=False)
-# model = CRFModelWrapper(model, len(tag2index)) -- # TODO: for ModelWithCRFLoss
-model.compile(loss = 'categorical_crossentropy', optimizer='adam', metrics = ['accuracy']) # TODO no loss for crf
-model.build((batch_size, longest_line,))
-# model.build([(None, longest_line), (None, longest_line, char_dim_size)]) # TODO: for CRFModelWrapper
+
+model_path = './model_diagrams/' + str(model_architecture) + '.png'
+print("Plotting model")
+keras.utils.plot_model(model, to_file=model_path, show_shapes=True)
+
+model = ModelWithCRFLoss(model, sparse_target=False)
+model.compile(optimizer='adam', metrics = ['accuracy'])
+model.build([(None, longest_line), (None, longest_line, char_dim_size)])
 print(model.summary())
 
 print("Training model")
-model.fit([X_train, X_char_train], Y_train, batch_size=batch_size, epochs=1, callbacks=[tensorboard_callback])
+model.fit([X_train, X_char_train], Y_train, batch_size=batch_size, epochs=60, callbacks=[tensorboard_callback])
 
 X_test, Y_test = get_word_sequences(test_data_df, word2index, tag2index)
 X_test, Y_test = get_formatted_data(X_test, Y_test, word2index, tag2index, longest_line)
-
-print("Running predictions")
 
 print("Generating test set character sequences")
 X_character_test = np.array(get_char_sequences_from_word_sequences(X_test, char2index, index2word, longest_line, char_dim_size))
 print("Got sequences with shape ", X_character_test.shape)
 
+print("Running predictions")
 y_hat = model.predict([X_test, X_character_test], verbose=10)
 predicted_tags = np.argmax(y_hat, axis=-1)
-y_true = np.argmax(Y_test, axis=2)  # axis = 1 w/crf wrapper (tensorflow_addons)
-print("Overall model accuracy: ", (predicted_tags == y_true).mean())
+y_true = np.argmax(Y_test, axis=2)
 print('---------------------')
 
-confusion_matrix = multilabel_confusion_matrix(y_true.flatten(), predicted_tags.flatten())
-# y_true argmax on axis 2, pass y_true and y_hat here if using crf2tensor lib
-# confusion_matrix = multilabel_confusion_matrix(y_true.flatten(), y_hat.flatten()) # TODO: use w/crf
+confusion_matrix = multilabel_confusion_matrix(y_true.flatten(), y_hat.flatten())
 
 accuracy_scores = []
 precision_scores = []

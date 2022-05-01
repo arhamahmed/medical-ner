@@ -1,0 +1,34 @@
+B-problem accuracy:  0.9991942500588727
+B-problem recall:  0.766243050039714
+B-problem precision:  0.8118320289489186
+B-problem f1 score:  0.788379029951375
+---------------------
+I-problem accuracy:  0.9987336811445879
+I-problem recall:  0.7520076914376201
+I-problem precision:  0.7909701980845875
+I-problem f1 score:  0.7709970138868757
+---------------------
+B-treatment accuracy:  0.9995131124475992
+B-treatment recall:  0.718368657675016
+B-treatment precision:  0.8324237161994542
+B-treatment f1 score:  0.7712020225235577
+---------------------
+I-treatment accuracy:  0.9995181609533421
+I-treatment recall:  0.6753834548654765
+I-treatment precision:  0.8007154568490088
+I-treatment f1 score:  0.7327286367046308
+---------------------
+B-test accuracy:  0.9994699420954078
+B-test recall:  0.7885032537960954
+B-test precision:  0.8317126186935133
+B-test f1 score:  0.8095317632648517
+---------------------
+I-test accuracy:  0.9995484746515183
+I-test recall:  0.7512481278082875
+I-test precision:  0.8276952695269527
+I-test f1 score:  0.7876210416121433
+---------------------
+Average accuracy on test data (each label):  0.9993296035585547
+Average precision on test data (each label):  0.8158915480504058
+Average recall on test data  (each label):  0.7419590392703683
+Average F1 score on test data (each label):  0.7767432513239058
