@@ -3,6 +3,7 @@ import pandas as pd
 from keras_preprocessing.text import Tokenizer
 from keras_preprocessing.sequence import pad_sequences
 
+# loads pretrained GloVe embeddings into numpy arrays
 def load_glove(path, large_set = False):
     glove_embeddings = {}
     f = open(path, encoding="utf-8")
@@ -16,6 +17,7 @@ def load_glove(path, large_set = False):
     print('Loaded %s glove word vectors.' % len(glove_embeddings))
     return glove_embeddings
 
+# loads up the processed data
 def load_dataset(path):
     data = np.loadtxt(path, comments=None, dtype=str)
     data_df = pd.DataFrame({'word': data[:, 0], 'line_num': data[:, 1], 'tag': data[:, 2]})
@@ -34,6 +36,7 @@ def get_word_to_index(train_data, test_data):
     word2index["<padding>"] = len(word2index)
     return word2index
 
+# converts a word dictionary to a character dictionary
 def get_char_to_index(data_dict):
     char2index = {'<pad>': 0, '<unw>': 1}
     for word, _ in data_dict.items():
@@ -53,6 +56,7 @@ def get_word_sequences(data, word2index, tag2index):
     Y.pop(0)
     return X, Y
 
+# given processed data, converts it into sequences of characters by word by line/sentence
 def get_char_sequences(data, char2index, line_length, char_dim_size):
     all_lines = data.groupby('line_num').apply(convert_to_tuples).tolist()
     # drop the added docstarts/emptylines
@@ -72,6 +76,7 @@ def get_char_sequences(data, char2index, line_length, char_dim_size):
         X_character.append(line_seq)
     return X_character
 
+# given word sequences (sequences of words by line), converts it into sequences of characters by word by line/sentence
 def get_char_sequences_from_word_sequences(word_sequences, char2index, index2word, sequence_length, char_length):
     X_character = []
     for seq in word_sequences:
@@ -100,10 +105,12 @@ def get_formatted_data(X, Y, word2index, tag2index, maxlength):
     Y = [ np.eye(len(tag2index))[line] for line in Y] # TODO: comment out for crf model
     return np.array(X), np.array(Y)
 
+# reformats 'word' and 'tag' columns from processed data
 def convert_to_tuples(data):
     iterator = zip(data["word"].values.tolist(), data["tag"].values.tolist())
     return [(word, tag) for word, tag in iterator]
 
+# generaates an embedding matrix given data and word indices
 def get_embedding_matrix(embedding_dim, vocab_size, word2index, embeddings):
     embedding_dim = 300
     word_embedding_matrix = np.zeros((vocab_size + 1, embedding_dim))
@@ -125,6 +132,7 @@ def get_embedding_matrix(embedding_dim, vocab_size, word2index, embeddings):
     print('hit: ', hit, 'miss: ', miss)
     return word_embedding_matrix
 
+# computes accuracy, recall, precision, and F1 metrics
 def get_stats(conf_matrix, tag_index, tag_name):
     true_neg, false_pos, false_neg, true_pos = conf_matrix[tag_index].ravel()
     acc = (true_pos + true_neg) / (true_neg + false_pos + false_pos + true_pos)

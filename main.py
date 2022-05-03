@@ -32,11 +32,14 @@ word2index = get_word_to_index(training_data_df, test_data_df)
 char2index = get_char_to_index(word2index)
 index2word = { v: k for k, v in word2index.items() }
 
+# convert list of words to sequences of indices per sentence
 X, Y = get_word_sequences(training_data_df, word2index, tag2index)
 
+# pad the sequences so they're all the same length
 longest_line = len(max(X, key=len))
 X, Y = get_formatted_data(X, Y, word2index, tag2index, longest_line)
 
+# discard a small portion of the training data to prevent overfitting
 X_train, _, Y_train, _ = train_test_split(X, Y, test_size=0.10, random_state=123)
 
 char_dim_size = 50
@@ -52,7 +55,6 @@ char_inp = keras.Input(shape=(longest_line, char_dim_size,), name="Character_Inp
 char_out = keras.layers.TimeDistributed(keras.layers.Embedding(
         input_dim=len(char2index),
         output_dim=char_dim_size, 
-        # input_length=char_dim_size, 
         trainable=True
     ), name = "Character_Embedding")(char_inp)
 char_out = keras.layers.TimeDistributed(keras.layers.Bidirectional(
@@ -109,6 +111,7 @@ match model_architecture:
         out = keras.layers.Lambda(lambda x: x + tf.roll(x, -1, 1), name = "Fully_connect_hidden_states_3")(out)
         out = keras.layers.Bidirectional(keras.layers.LSTM(350, return_sequences=True), name = "BiFC_4")(out)
 
+# setup tracing
 tensorboard_callback = keras.callbacks.TensorBoard(
     log_dir='./logs/fit' + datetime.datetime.now().strftime("%Y%m%d-%H%M%S"),
     histogram_freq=1,
@@ -123,14 +126,16 @@ model_path = './model_diagrams/' + str(model_architecture) + '.png'
 print("Plotting model")
 keras.utils.plot_model(model, to_file=model_path, show_shapes=True)
 
+# this essentially appends a CRF layer for prediction
 model = ModelWithCRFLoss(model, sparse_target=False)
 model.compile(optimizer='adam', metrics = ['accuracy'])
 model.build([(None, longest_line), (None, longest_line, char_dim_size)])
 print(model.summary())
 
 print("Training model")
-model.fit([X_train, X_char_train], Y_train, batch_size=batch_size, epochs=60, callbacks=[tensorboard_callback])
+model.fit([X_train, X_char_train], Y_train, batch_size=batch_size, epochs=200, callbacks=[tensorboard_callback])
 
+# convert training data (list of words) to sequences of padded indices
 X_test, Y_test = get_word_sequences(test_data_df, word2index, tag2index)
 X_test, Y_test = get_formatted_data(X_test, Y_test, word2index, tag2index, longest_line)
 
@@ -151,6 +156,7 @@ precision_scores = []
 recall_scores = []
 f1_scores = []
 
+# compute performance metrics
 for tag, index in tag2index.items():
     if 'B-' in tag or 'I-' in tag:
         acc, prec, recall, f1 = get_stats(confusion_matrix, index, tag)
